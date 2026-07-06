@@ -13,7 +13,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "proxy": "http://localhost:5000",
+  "proxy": "https://chirag-traders.onrender.com",
   "browserslist": {
     "production": [
       ">0.2%",
