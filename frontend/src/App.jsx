@@ -79,6 +79,69 @@ function commitSequence(seq) {
 
 // ─── END AUTO INVOICE HELPERS ──────────────────────────────────────────────
 
+// ─── PRINT HELPER ───────────────────────────────────────────────────────────
+// Injects a print-only stylesheet (once) that hides everything on the page
+// except #invoice-print-area, then prints the current window directly.
+// This replaced an earlier window.open()/iframe based approach: on mobile
+// browsers (Chrome/Safari on Android & iOS), popups get blocked and hidden
+// iframes are often ignored by the print engine, which caused the printed
+// page to show the whole app (header/sidebar) instead of just the invoice.
+// Printing the current document with a print-only CSS override works
+// reliably across desktop and mobile.
+function ensurePrintStyles() {
+  if (document.getElementById("invoice-print-styles")) return;
+  const style = document.createElement("style");
+  style.id = "invoice-print-styles";
+  style.innerHTML = `
+    @media print {
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+      body * { visibility: hidden !important; }
+      #invoice-print-area, #invoice-print-area * { visibility: visible !important; }
+      #invoice-print-area {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+      }
+      @page { size: A4; margin: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function printInvoiceArea(form, onDone) {
+  const el = document.getElementById("invoice-print-area");
+  if (!el) return false;
+
+  ensurePrintStyles();
+
+  const prevTitle = document.title;
+  document.title = `Invoice ${form?.invoiceNo || ''} - Chirag Traders`;
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    document.title = prevTitle;
+    window.removeEventListener("afterprint", finish);
+    if (onDone) onDone();
+  };
+  window.addEventListener("afterprint", finish);
+
+  window.print();
+
+  // Fallback for mobile browsers that don't fire 'afterprint' reliably.
+  setTimeout(finish, 1500);
+  return true;
+}
+// ─── END PRINT HELPER ───────────────────────────────────────────────────────
+
 // ─── ITEM NAME + BRAND (now stored in DB, managed via "Manage Items" page) ──
 // Stored/displayed as "RICE TYPE(WEIGHT) – BRAND" so the printed invoice can
 // split it into two lines (rice type bold on top, brand italic below).
@@ -1066,78 +1129,13 @@ function CreateEditPage({ editId, onDone, toast }) {
 
   // commitAfterPrint: true only when called from "Save & Print" flow for a NEW invoice
   const handlePrint = (commitAfterPrint=false) => {
-    const el = document.getElementById("invoice-print-area");
-    if (!el) { toast("Switch to Preview tab first to print", "info"); return; }
-
-    const printHtml = `<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
-    <style>
-      * { 
-        -webkit-print-color-adjust: exact !important; 
-        print-color-adjust: exact !important; 
-        color-adjust: exact !important; 
-        box-sizing: border-box;
-      }
-      body { 
-        margin: 0; 
-        padding: 0; 
-        font-family: Arial, sans-serif; 
-        background: #555;
-        display: flex;
-        justify-content: center;
-      }
-      @page { 
-        size: A4; 
-        margin: 0; 
-      }
-      @media print { 
-        body { background: #fff; display: block; }
-        .page-container {
-           box-shadow: none !important;
-           margin: 0 !important;
-           width: 100% !important;
-        }
-      }
-    </style>
-    </head><body>${el.outerHTML}</body></html>`;
-
-    // Print via a hidden same-page <iframe> instead of window.open("","_blank").
-    // Mobile browsers (Chrome/Safari on Android & iOS) routinely block or fail
-    // to render popup windows opened this way, which is why printing didn't
-    // work on phones. An iframe stays inside the current page/window so it
-    // isn't treated as a popup and mobile printing works reliably.
-    let iframe = document.getElementById("invoice-print-frame");
-    if (iframe) iframe.remove();
-    iframe = document.createElement("iframe");
-    iframe.id = "invoice-print-frame";
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
-
-    const finishUp = () => {
+    const ok = printInvoiceArea(form, () => {
       // Commit sequence only for new invoices after print was triggered
       if (commitAfterPrint && form._invoiceSeq && !editId) {
         commitSequence(form._invoiceSeq);
       }
-      setTimeout(() => { iframe.remove(); }, 1000);
-    };
-
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } finally {
-        finishUp();
-      }
-    };
-
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(printHtml);
-    doc.close();
+    });
+    if (!ok) toast("Switch to Preview tab first to print", "info");
   };
 
   if (loading) return <div style={{ textAlign:"center", padding:60, color:"#9ca3af", fontSize:15 }}>Loading invoice…</div>;
@@ -1201,70 +1199,7 @@ function ViewPage({ invoiceId, onBack, onEdit, toast }) {
   }, [invoiceId]);
 
   const handlePrint = () => {
-    const el = document.getElementById("invoice-print-area");
-    if (!el) return;
-
-    const printHtml = `<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
-    <style>
-      * { 
-        -webkit-print-color-adjust: exact !important; 
-        print-color-adjust: exact !important; 
-        color-adjust: exact !important; 
-        box-sizing: border-box;
-      }
-      body { 
-        margin: 0; 
-        padding: 0; 
-        font-family: Arial, sans-serif; 
-        background: #555;
-        display: flex;
-        justify-content: center;
-      }
-      @page { 
-        size: A4; 
-        margin: 0; 
-      }
-      @media print { 
-        body { background: #fff; display: block; }
-        .page-container {
-           box-shadow: none !important;
-           margin: 0 !important;
-           width: 100% !important;
-        }
-      }
-    </style>
-    </head><body>${el.outerHTML}</body></html>`;
-
-    // Print via a hidden same-page <iframe> instead of window.open("","_blank").
-    // Mobile browsers (Chrome/Safari on Android & iOS) routinely block or fail
-    // to render popup windows opened this way, which is why printing didn't
-    // work on phones. An iframe stays inside the current page/window so it
-    // isn't treated as a popup and mobile printing works reliably.
-    let iframe = document.getElementById("invoice-print-frame");
-    if (iframe) iframe.remove();
-    iframe = document.createElement("iframe");
-    iframe.id = "invoice-print-frame";
-    iframe.style.position = "fixed";
-    iframe.style.right = "0";
-    iframe.style.bottom = "0";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "0";
-    document.body.appendChild(iframe);
-
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } finally {
-        setTimeout(() => { iframe.remove(); }, 1000);
-      }
-    };
-
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(printHtml);
-    doc.close();
+    printInvoiceArea(form);
   };
 
   if (loading) return <div style={{ textAlign:"center", padding:60, color:"#9ca3af" }}>Loading…</div>;
