@@ -1,5 +1,11 @@
-const BASE = "/api/invoices";
-const ITEMS_BASE = "/api/items";
+// In production (e.g. Vercel), there is no CRA proxy, so relative "/api/..."
+// requests hit the frontend's own domain, not the backend.
+// REACT_APP_API_URL lets us point straight at the deployed backend on Render,
+// while staying empty ("") in local dev so the package.json "proxy" still works.
+const API_URL = process.env.REACT_APP_API_URL || "";
+
+const BASE = `${API_URL}/api/invoices`;
+const ITEMS_BASE = `${API_URL}/api/items`;
 
 async function request(url, options = {}) {
   const res = await fetch(url, {
