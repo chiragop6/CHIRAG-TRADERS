@@ -1068,8 +1068,8 @@ function CreateEditPage({ editId, onDone, toast }) {
   const handlePrint = (commitAfterPrint=false) => {
     const el = document.getElementById("invoice-print-area");
     if (!el) { toast("Switch to Preview tab first to print", "info"); return; }
-    const w = window.open("","_blank");
-    w.document.write(`<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
+
+    const printHtml = `<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
     <style>
       * { 
         -webkit-print-color-adjust: exact !important; 
@@ -1098,17 +1098,46 @@ function CreateEditPage({ editId, onDone, toast }) {
         }
       }
     </style>
-    </head><body>${el.outerHTML}</body></html>`);
-    w.document.close();
-    setTimeout(() => {
-      w.focus();
-      w.print();
-      w.close();
-      // Commit sequence only for new invoices after successful print
+    </head><body>${el.outerHTML}</body></html>`;
+
+    // Print via a hidden same-page <iframe> instead of window.open("","_blank").
+    // Mobile browsers (Chrome/Safari on Android & iOS) routinely block or fail
+    // to render popup windows opened this way, which is why printing didn't
+    // work on phones. An iframe stays inside the current page/window so it
+    // isn't treated as a popup and mobile printing works reliably.
+    let iframe = document.getElementById("invoice-print-frame");
+    if (iframe) iframe.remove();
+    iframe = document.createElement("iframe");
+    iframe.id = "invoice-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const finishUp = () => {
+      // Commit sequence only for new invoices after print was triggered
       if (commitAfterPrint && form._invoiceSeq && !editId) {
         commitSequence(form._invoiceSeq);
       }
-    }, 500);
+      setTimeout(() => { iframe.remove(); }, 1000);
+    };
+
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } finally {
+        finishUp();
+      }
+    };
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(printHtml);
+    doc.close();
   };
 
   if (loading) return <div style={{ textAlign:"center", padding:60, color:"#9ca3af", fontSize:15 }}>Loading invoice…</div>;
@@ -1174,8 +1203,8 @@ function ViewPage({ invoiceId, onBack, onEdit, toast }) {
   const handlePrint = () => {
     const el = document.getElementById("invoice-print-area");
     if (!el) return;
-    const w = window.open("","_blank");
-    w.document.write(`<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
+
+    const printHtml = `<!DOCTYPE html><html><head><title>Invoice ${form?.invoiceNo || ''} – Chirag Traders</title>
     <style>
       * { 
         -webkit-print-color-adjust: exact !important; 
@@ -1204,9 +1233,38 @@ function ViewPage({ invoiceId, onBack, onEdit, toast }) {
         }
       }
     </style>
-    </head><body>${el.outerHTML}</body></html>`);
-    w.document.close();
-    setTimeout(() => { w.focus(); w.print(); w.close(); }, 500);
+    </head><body>${el.outerHTML}</body></html>`;
+
+    // Print via a hidden same-page <iframe> instead of window.open("","_blank").
+    // Mobile browsers (Chrome/Safari on Android & iOS) routinely block or fail
+    // to render popup windows opened this way, which is why printing didn't
+    // work on phones. An iframe stays inside the current page/window so it
+    // isn't treated as a popup and mobile printing works reliably.
+    let iframe = document.getElementById("invoice-print-frame");
+    if (iframe) iframe.remove();
+    iframe = document.createElement("iframe");
+    iframe.id = "invoice-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } finally {
+        setTimeout(() => { iframe.remove(); }, 1000);
+      }
+    };
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(printHtml);
+    doc.close();
   };
 
   if (loading) return <div style={{ textAlign:"center", padding:60, color:"#9ca3af" }}>Loading…</div>;
