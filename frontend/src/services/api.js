@@ -41,6 +41,31 @@ export const api = {
   // Delete
   deleteInvoice: (id) => request(`${BASE}/${id}`, { method: "DELETE" }),
 
+  // Returns the next available sequence number by reading all invoices from DB
+  getNextInvoiceNo: async () => {
+    const fy = (() => {
+      const now = new Date();
+      const yr  = now.getFullYear();
+      const mo  = now.getMonth();
+      const startYr = mo >= 3 ? yr : yr - 1;
+      const endYr   = startYr + 1;
+      return `${String(startYr).slice(-2)}-${String(endYr).slice(-2)}`;
+    })();
+    // Fetch all invoices (large limit) to find the true max sequence in DB
+    const res = await request(`${BASE}?limit=10000&sortBy=invoiceNo&sortDir=desc`);
+    const invoices = res.data || [];
+    let maxSeq = 0;
+    const pattern = new RegExp(`^CT/(\\d{4})/${fy}$`);
+    for (const inv of invoices) {
+      const m = (inv.invoiceNo || "").match(pattern);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n > maxSeq) maxSeq = n;
+      }
+    }
+    return maxSeq + 1;
+  },
+
   // ─── Items (rice name + brand + HSN code) ────────────────────────────────
   getItems: () => request(ITEMS_BASE),
 

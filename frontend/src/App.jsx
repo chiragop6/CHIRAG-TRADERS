@@ -1086,9 +1086,16 @@ function CreateEditPage({ editId, onDone, toast }) {
 
   useEffect(() => {
     if (!editId) {
-      // New invoice — assign next auto number immediately
-      const seq = getNextSequence();
-      setForm({ ...blankForm(), invoiceNo: buildInvoiceNo(seq), _invoiceSeq: seq });
+      // New invoice — fetch the true next sequence number from DB
+      api.getNextInvoiceNo()
+        .then(seq => {
+          setForm({ ...blankForm(), invoiceNo: buildInvoiceNo(seq), _invoiceSeq: seq });
+        })
+        .catch(() => {
+          // Fallback to localStorage if API fails
+          const seq = getNextSequence();
+          setForm({ ...blankForm(), invoiceNo: buildInvoiceNo(seq), _invoiceSeq: seq });
+        });
       return;
     }
     setLoading(true);
