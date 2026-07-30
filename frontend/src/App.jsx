@@ -485,6 +485,10 @@ function FormField({ label, name, type="text", span=1, placeholder="", value, on
 function InvoiceForm({ form, setForm }) {
   const MAX_ROWS = 18;
   const [items, setItems] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [custSuggestions, setCustSuggestions] = useState([]);
+  const [showCustDrop, setShowCustDrop] = useState(false);
+  const custDropRef = useRef(null);
 
   // Load the item + brand list from the database for suggestions
   useEffect(() => {
@@ -493,9 +497,66 @@ function InvoiceForm({ form, setForm }) {
       .catch(() => setItems([]));
   }, []);
 
+  // Load past customers from all invoices for autocomplete
+  useEffect(() => {
+    api.getInvoices({ limit: 10000 })
+      .then(r => {
+        const seen = new Map();
+        (r.data || []).forEach(inv => {
+          const key = (inv.customerName || "").toUpperCase().trim();
+          if (key && !seen.has(key)) {
+            seen.set(key, {
+              customerName:  inv.customerName  || "",
+              address:       inv.address       || "",
+              mobile:        inv.mobile        || "",
+              customerGstin: inv.customerGstin || "",
+            });
+          }
+        });
+        setCustomers([...seen.values()]);
+      })
+      .catch(() => setCustomers([]));
+  }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (custDropRef.current && !custDropRef.current.contains(e.target)) {
+        setShowCustDrop(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const itemOptions = items.map(it => `${it.name}${ITEM_SEP}${it.brand}`);
 
-  const handleField = (name, value) => setForm(f => ({ ...f, [name]: value }));
+  const handleField = (name, value) => {
+    setForm(f => ({ ...f, [name]: value }));
+    if (name === "customerName") {
+      const q = value.trim().toUpperCase();
+      if (q.length >= 1) {
+        const filtered = customers.filter(c =>
+          c.customerName.toUpperCase().includes(q)
+        );
+        setCustSuggestions(filtered);
+        setShowCustDrop(filtered.length > 0);
+      } else {
+        setShowCustDrop(false);
+      }
+    }
+  };
+
+  const selectCustomer = (cust) => {
+    setForm(f => ({
+      ...f,
+      customerName:  cust.customerName,
+      address:       cust.address,
+      mobile:        cust.mobile,
+      customerGstin: cust.customerGstin,
+    }));
+    setShowCustDrop(false);
+  };
 
   const updateRow = (i, field, val) => {
     const rows = form.rows.map((r, idx) => {
@@ -555,7 +616,56 @@ function InvoiceForm({ form, setForm }) {
       <div style={S.card}>
         <h3 style={S.sectionHdr}>Customer Details</h3>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-          <FormField label="Customer Name" name="customerName" span={2} value={form.customerName} onChange={handleField} />
+
+          {/* Customer Name with autocomplete dropdown */}
+          <div style={{ gridColumn:"span 2", display:"flex", flexDirection:"column", gap:4, position:"relative" }} ref={custDropRef}>
+            <label style={S.label}>Customer Name</label>
+            <input
+              type="text"
+              value={form.customerName || ""}
+              placeholder="Type customer name..."
+              onChange={e => handleField("customerName", e.target.value)}
+              onFocus={() => {
+                const q = (form.customerName || "").trim().toUpperCase();
+                if (q.length >= 1) {
+                  const filtered = customers.filter(c => c.customerName.toUpperCase().includes(q));
+                  setCustSuggestions(filtered);
+                  setShowCustDrop(filtered.length > 0);
+                }
+              }}
+              style={S.input}
+              autoComplete="off"
+            />
+            {showCustDrop && custSuggestions.length > 0 && (
+              <div style={{
+                position:"absolute", top:"100%", left:0, right:0, zIndex:999,
+                background:"#fff", border:"1.5px solid #1a3a7a", borderRadius:7,
+                boxShadow:"0 4px 16px #0002", maxHeight:220, overflowY:"auto", marginTop:2,
+              }}>
+                <div style={{ padding:"6px 12px", fontSize:11, color:"#9ca3af", borderBottom:"1px solid #f1f5f9", fontWeight:600 }}>
+                  📋 Previous Customers — click to auto-fill
+                </div>
+                {custSuggestions.map((c, idx) => (
+                  <div key={idx}
+                    onMouseDown={() => selectCustomer(c)}
+                    style={{
+                      padding:"9px 14px", cursor:"pointer", fontSize:13,
+                      borderBottom:"1px solid #f9fafb",
+                      display:"flex", flexDirection:"column", gap:2,
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background="#eef2ff"}
+                    onMouseLeave={e => e.currentTarget.style.background="#fff"}
+                  >
+                    <span style={{ fontWeight:700, color:"#1a3a7a" }}>{c.customerName}</span>
+                    <span style={{ fontSize:11, color:"#6b7280" }}>
+                      {[c.mobile, c.address].filter(Boolean).join(" · ")}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <FormField label="Address" name="address" span={2} value={form.address} onChange={handleField} />
           <FormField label="Mobile Number" name="mobile" type="tel" value={form.mobile} onChange={handleField} />
           <FormField label="Customer GSTIN" name="customerGstin" value={form.customerGstin} onChange={handleField} />
@@ -944,6 +1054,9 @@ function ItemsPage({ toast }) {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm]           = useState({ name:"", brand:"", hsnCode:"" });
 
+  // Use a ref so handleSubmit always sees the latest editingId (avoids stale closure)
+  const editingIdRef = useRef(null);
+
   const load = () => {
     setLoading(true);
     api.getItems()
@@ -954,17 +1067,22 @@ function ItemsPage({ toast }) {
 
   useEffect(() => { load(); }, []);
 
-  const resetForm = () => { setForm({ name:"", brand:"", hsnCode:"" }); setEditingId(null); };
+  const resetForm = () => {
+    setForm({ name:"", brand:"", hsnCode:"" });
+    setEditingId(null);
+    editingIdRef.current = null;
+  };
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.brand.trim()) {
       toast("Rice name and brand are required", "error");
       return;
     }
+    const currentEditingId = editingIdRef.current;
     setSaving(true);
     try {
-      if (editingId) {
-        await api.updateItem(editingId, form);
+      if (currentEditingId) {
+        await api.updateItem(currentEditingId, form);
         toast("Item updated!", "success");
       } else {
         await api.createItem(form);
@@ -980,6 +1098,7 @@ function ItemsPage({ toast }) {
   };
 
   const handleEdit = (it) => {
+    editingIdRef.current = it._id;
     setEditingId(it._id);
     setForm({ name: it.name, brand: it.brand, hsnCode: it.hsnCode || "" });
   };
